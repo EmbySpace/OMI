@@ -1,6 +1,10 @@
 # OMI — Open Mesh Informator
 Open Mesh Informator is a Python script for automated weather report generation and broadcasting over LoRa mesh networks via MeshCore.
 
+[![Hardware: ESP32](https://img.shields.io/badge/Hardware-ESP32-E7352C?logo=espressif&logoColor=white)](#)
+[![Platform: Arduino](https://img.shields.io/badge/Platform-Arduino-00979D?logo=arduino&logoColor=white)](#)
+[![Network: MeshCore](https://img.shields.io/badge/Network-MeshCore-523293)](#)
+
 The script fetches current weather data, generates a short broadcast greeting using a local Ollama instance with Qwen2.5:3b, optimizes the payload size, splits longer messages into chunked packets, and sends them to the public mesh channel via MeshCore CLI over a wired USB/serial connection.
 
 Features
