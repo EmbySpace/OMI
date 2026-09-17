@@ -1,49 +1,159 @@
 # OMI — Open Mesh Informator
-Open Mesh Informator is a Python script for automated weather report generation and broadcasting over LoRa mesh networks via MeshCore.
 
 [![Hardware: ESP32](https://img.shields.io/badge/Hardware-ESP32-E7352C?logo=espressif&logoColor=white)](#)
 [![Platform: Arduino](https://img.shields.io/badge/Platform-Arduino-00979D?logo=arduino&logoColor=white)](#)
 [![Network: MeshCore](https://img.shields.io/badge/Network-MeshCore-523293)](#)
+[![LLM: Ollama · Qwen2.5](https://img.shields.io/badge/LLM-Ollama%20%C2%B7%20Qwen2.5-000000?logo=ollama&logoColor=white)](#)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](#лицензия)
 
-The script fetches current weather data, generates a short broadcast greeting using a local Ollama instance with Qwen2.5:3b, optimizes the payload size, splits longer messages into chunked packets, and sends them to the public mesh channel via MeshCore CLI over a wired USB/serial connection.
+**OMI (Open Mesh Informator)** — Python-скрипт для автоматической генерации и рассылки погодных приветствий в LoRa mesh-сетях через **MeshCore**.
 
-Features
-Wired Connection: Interacts directly with the MeshCore node over USB/Serial. Radio frequencies and channel parameters must be pre-configured on the hardware node itself.
+Скрипт получает актуальную погоду, с помощью **локальной** LLM (Ollama + Qwen2.5) сочиняет короткое живое приветствие, оптимизирует размер сообщения под LoRa-пакет и отправляет его в публичный канал mesh-сети через MeshCore CLI по проводному USB/Serial-соединению. Никаких облачных API — вся генерация текста происходит офлайн, на вашей собственной машине.
 
-Public Channel Broadcast: Transmits generated weather updates directly to the main public mesh chat.
+В репозитории две готовые версии скрипта под разное железо — см. таблицу ниже.
 
-Cyrillic Homoglyph Optimization: Replaces overlapping Cyrillic characters with single-byte Latin equivalents, saving 15-20% of UTF-8 space.
+---
 
-Smart Punctuation Splitter: Splits long text by punctuation marks, adds chunk indexing like [1/2], and holds a 10-second delay between packet bursts.
+## Содержание
 
-LLM Output Sanitization: Strips non-ASCII artifacts, Chinese characters, newlines, and quotes from generated text.
+- [Как это работает](#как-это-работает)
+- [Особенности](#особенности)
+- [Две версии скрипта](#две-версии-скрипта)
+- [Требования](#требования)
+- [Установка и запуск](#установка-и-запуск)
+- [Настройка параметров](#настройка-параметров)
+- [TODO / Roadmap](#todo--roadmap)
+- [Лицензия](#лицензия)
 
-Timeout Safeguards: Commands run with a 15-second execution timeout to prevent serial port freezes.
+---
 
-Offline Fallback: Falls back to a hardcoded template if the external weather service is unavailable.
+## Как это работает
 
-TODO / Roadmap
-Add Wi-Fi and Bluetooth connection support for wireless operation.
+Пайплайн от запроса погоды до пакета в эфире:
 
-Native Meshtastic protocol integration.
+1. **Погода** — запрос текущей температуры в Москве через `wttr.in`; если сервис недоступен — офлайн-шаблон с фиксированным значением.
+2. **Генерация текста** — промпт с погодой и стилевым ориентиром отправляется в локальный Ollama-сервер (`/api/generate`), который возвращает короткое оригинальное приветствие.
+3. **Санитизация** — из ответа модели убираются кавычки, переносы строк, иероглифы и прочий «мусор», остаётся чистая фраза.
+4. **Оптимизация байтов** — кириллические буквы, визуально совпадающие с латиницей (а→a, е→e, о→o и т.д.), заменяются на латинские аналоги: экономия 15–20% полезной нагрузки UTF-8.
+5. **Разбиение на пакеты** — если сообщение всё равно не влезает в лимит байт, текст умно режется по знакам препинания, каждому фрагменту добавляется индекс `[1/2]`.
+6. **Отправка** — пакеты уходят в публичный канал через `meshcore-cli` с паузой 10 секунд между посылками и таймаутом 15 секунд на случай зависания COM-порта.
 
-Quick Start
-Install dependencies:
+---
+
+## Особенности
+
+- **Полностью локальная генерация текста** — Qwen2.5 через Ollama, без сторонних облачных LLM-API и без утечки данных наружу.
+- **Проводное подключение** — работа напрямую с нодой MeshCore по USB/Serial; частота и параметры канала настраиваются один раз на самой ноде.
+- **Рассылка в публичный канал** — готовые погодные апдейты уходят прямо в основной публичный чат mesh-сети.
+- **Оптимизация кириллицы через гомоглифы** — замена визуально идентичных букв на однобайтовые латинские аналоги экономит 15–20% места в UTF-8-пакете.
+- **Умный сплиттер по пунктуации** — длинный текст режется по знакам препинания, а не посередине слова, с автоматической нумерацией `[1/2]` и паузой между пакетами.
+- **Санитизация вывода LLM** — из сгенерированного текста удаляются не-ASCII артефакты, иероглифы, переносы строк и лишние кавычки.
+- **Защита от зависаний** — все команды выполняются с таймаутом 15 секунд, чтобы не «подвесить» COM-порт.
+- **Офлайн-fallback** — если погодный сервис недоступен, используется заранее заданный шаблон, скрипт не падает.
+
+---
+
+## Две версии скрипта
+
+| | `main_qwen2.5-3b.py` | `main_qwen2.5-1.5b.py` |
+|---|---|---|
+| Модель Ollama | `qwen2.5:3b` | `qwen2.5:1.5b` |
+| Требования к RAM | выше, качественнее генерация | компактная, ~1.1 ГБ |
+| COM/TTY-порт | задаётся вручную в коде (`SERIAL_PORT`) | определяется **автоматически** через `pyserial` |
+| Стиль промпта | генерация по примеру-ориентиру из набора образцов | генерация по случайному «стилю» + более строгие требования к длине |
+| Fallback-фразы при ошибке ИИ | один универсальный шаблон | три варианта случайных приветствий |
+| Доп. зависимость | — | `pyserial` |
+
+**Какую версию выбрать:** если у вас всегда один и тот же COM-порт и достаточно RAM — берите `3b`-версию, она даёт более развёрнутый текст. Если нода может менять порт (переподключение, другой USB-хаб) или железо слабее — используйте `1.5b`-версию с автоопределением порта.
+
+---
+
+## Требования
+
+- Python 3.9+
+- ESP32-нода с прошивкой **MeshCore**, подключённая по USB, с уже настроенными частотой и параметрами канала
+- Установленный и запущенный [Ollama](https://ollama.com/)
+- Пакеты `meshcore-cli` и `requests` (обе версии), плюс `pyserial` (только для `1.5b`-версии)
+
+---
+
+## Установка и запуск
+
+### 1. Установите зависимости
+
+```bash
 pip install requests meshcore-cli
 
-Pull the model in Ollama:
+# только для версии с автоопределением порта:
+pip install pyserial
+```
+
+### 2. Установите и запустите Ollama, скачайте модель
+
+```bash
+# для main_qwen2.5-3b.py
 ollama pull qwen2.5:3b
 
-Prepare the node interface if required:
+# для main_qwen2.5-1.5b.py
+ollama pull qwen2.5:1.5b
+```
+
+Убедитесь, что сервис Ollama слушает `http://localhost:11434` (запускается автоматически после установки).
+
+### 3. Подготовьте LoRa-ноду
+
+Подключите ESP32-ноду с MeshCore по USB и один раз инициализируйте её через CLI (замените `COM12` на ваш порт):
+
+```bash
 meshcore-cli -s COM12 prepare
+```
 
-Set parameters in main_qwen2.5-3b.py:
-SERIAL_PORT = "COM12"
-MAX_BYTES = 110
-OLLAMA_MODEL = "qwen2.5:3b"
+Частота, мощность и параметры канала настраиваются на самой ноде заранее — скрипт их не меняет.
 
-Run the script:
+### 4. Настройте параметры скрипта
+
+Откройте нужный файл (`main_qwen2.5-3b.py` или `main_qwen2.5-1.5b.py`) и при необходимости поправьте блок настроек в начале файла — подробности в разделе «Настройка параметров».
+
+### 5. Запустите
+
+```bash
+# версия с ручным указанием порта и моделью 3b
 python main_qwen2.5-3b.py
 
-License
+# версия с автоопределением порта и моделью 1.5b
+python main_qwen2.5-1.5b.py
+```
+
+Скрипт последовательно выведет в консоль: результат запроса погоды, сгенерированный ИИ-текст, статистику по экономии байт и статус отправки каждого пакета.
+
+---
+
+## Настройка параметров
+
+| Параметр | Где задаётся | Значение по умолчанию | Описание |
+|---|---|---|---|
+| `SERIAL_PORT` | `main_qwen2.5-3b.py` | `"COM12"` | COM/TTY-порт ноды. В версии `1.5b` определяется автоматически. |
+| `MAX_BYTES` | обе версии | `110` | Максимальный размер одного LoRa-пакета в байтах. |
+| `OLLAMA_MODEL` | обе версии | `"qwen2.5:3b"` / `"qwen2.5:1.5b"` | Имя модели Ollama, используемой для генерации текста. |
+
+Если у вас другой лимит пакета MeshCore (например, из-за иной конфигурации LoRa), просто измените `MAX_BYTES` — сплиттер и расчёт байт подстроятся автоматически.
+
+---
+
+## TODO / Roadmap
+
+- [x] Автоматическое определение COM/TTY-порта ноды (реализовано в `main_qwen2.5-1.5b.py`)
+- [x] Компактная модель для слабого железа — `qwen2.5:1.5b` (~1.1 ГБ RAM)
+- [ ] Поддержка Wi-Fi и Bluetooth-подключения к ноде (беспроводной режим)
+- [ ] Нативная интеграция протокола Meshtastic
+- [ ] Погода для нескольких городов/регионов по выбору
+- [ ] Вынести настройки в `.env` / аргументы командной строки вместо правки кода
+- [ ] Docker-образ для быстрого развёртывания
+- [ ] Логирование в файл (сейчас только вывод в консоль)
+- [ ] Планировщик/демон-режим (запуск по расписанию без cron)
+
+---
+
+## Лицензия
+
 MIT
